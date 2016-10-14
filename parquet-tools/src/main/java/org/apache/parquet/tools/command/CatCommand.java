@@ -24,18 +24,16 @@ import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 
-import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetReader;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.tools.Main;
+import org.apache.parquet.tools.json.JsonRecordFormatter;
 import org.apache.parquet.tools.read.SimpleReadSupport;
 import org.apache.parquet.tools.read.SimpleRecord;
-import org.apache.parquet.tools.json.JsonRecordFormatter;
 
-public class CatCommand extends ArgsOnlyCommand {
+public class CatCommand extends ReadCommand {
   public static final String[] USAGE = new String[] {
     "<input>",
     "where <input> is the parquet file to print to stdout"
@@ -71,12 +69,15 @@ public class CatCommand extends ArgsOnlyCommand {
     String[] args = options.getArgs();
     String input = args[0];
 
+    Path basePath = null;
     ParquetReader<SimpleRecord> reader = null;
     try {
+      basePath = new Path(input);
       PrintWriter writer = new PrintWriter(Main.out, true);
-      reader = ParquetReader.builder(new SimpleReadSupport(), new Path(input)).build();
-      ParquetMetadata metadata = ParquetFileReader.readFooter(new Configuration(), new Path(input));
-      JsonRecordFormatter.JsonGroupFormatter formatter = JsonRecordFormatter.fromSchema(metadata.getFileMetaData().getSchema());
+      ParquetMetadata metadata = getMetadata(basePath, filterPartitionFiles());
+      reader = ParquetReader.builder(new SimpleReadSupport(), basePath).build();
+      JsonRecordFormatter.JsonGroupFormatter formatter =
+        JsonRecordFormatter.fromSchema(metadata.getFileMetaData().getSchema());
 
       for (SimpleRecord value = reader.read(); value != null; value = reader.read()) {
         if (options.hasOption('j')) {

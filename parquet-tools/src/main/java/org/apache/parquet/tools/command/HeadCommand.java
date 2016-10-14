@@ -19,20 +19,13 @@
 package org.apache.parquet.tools.command;
 
 import java.io.PrintWriter;
-import java.util.Arrays;
-import java.util.List;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.PathFilter;
 
-import org.apache.parquet.hadoop.Footer;
-import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetReader;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.tools.Main;
@@ -40,7 +33,7 @@ import org.apache.parquet.tools.json.JsonRecordFormatter;
 import org.apache.parquet.tools.read.SimpleReadSupport;
 import org.apache.parquet.tools.read.SimpleRecord;
 
-public class HeadCommand extends ArgsOnlyCommand {
+public class HeadCommand extends ReadCommand {
   private static final long DEFAULT = 5;
 
   public static final String[] USAGE = new String[] {
@@ -76,16 +69,6 @@ public class HeadCommand extends ArgsOnlyCommand {
     return USAGE;
   }
 
-  private PathFilter getPartitionFilesFilter() {
-    return new PathFilter() {
-      @Override
-      public boolean accept(Path path) {
-        // ignore Spark '_SUCCESS' files
-        return !path.getName().equals("_SUCCESS");
-      }
-    };
-  }
-
   @Override
   public void execute(CommandLine options) throws Exception {
     super.execute(options);
@@ -98,32 +81,18 @@ public class HeadCommand extends ArgsOnlyCommand {
     String[] args = options.getArgs();
     String input = args[0];
 
+    Path basePath = null;
     ParquetReader<SimpleRecord> reader = null;
-    boolean asJson = options.hasOption('j');
     try {
+      basePath = new Path(input);
       PrintWriter writer = new PrintWriter(Main.out, true);
-      reader = ParquetReader.builder(new SimpleReadSupport(), new Path(input)).build();
-      // we read footer only when output as json
-      JsonRecordFormatter.JsonGroupFormatter formatter = null;
-      if (asJson) {
-        // if input file is a directory search for any metadata
-        Configuration conf = new Configuration();
-        Path basePath = new Path(input);
-        FileSystem fs = basePath.getFileSystem(conf);
-        List<Footer> footers = ParquetFileReader.readAllFootersInParallelUsingSummaryFiles(
-          conf, Arrays.asList(fs.listStatus(basePath, getPartitionFilesFilter())));
-        // select first metadata that we found, fail if none available
-        if (footers == null || footers.isEmpty()) {
-          throw new IllegalArgumentException("Could not find metadata in " + basePath);
-        } else {
-          // footer.get(0) returns ParquetMetadata
-          ParquetMetadata metadata = footers.get(0).getParquetMetadata();
-          formatter = JsonRecordFormatter.fromSchema(metadata.getFileMetaData().getSchema());
-        }
-      }
+      ParquetMetadata metadata = getMetadata(basePath, filterPartitionFiles());
+      reader = ParquetReader.builder(new SimpleReadSupport(), basePath).build();
+      JsonRecordFormatter.JsonGroupFormatter formatter =
+        JsonRecordFormatter.fromSchema(metadata.getFileMetaData().getSchema());
 
       for (SimpleRecord value = reader.read(); value != null && num-- > 0; value = reader.read()) {
-        if (asJson) {
+        if (options.hasOption('j')) {
           writer.write(formatter.formatRecord(value));
         } else {
           value.prettyPrint(writer);
